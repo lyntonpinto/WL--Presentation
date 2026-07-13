@@ -3,19 +3,232 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Open Presentation</title>
+  <title>Worklyffe Presentation — Interactive Viewer</title>
+  <style>
+    :root {
+      --brand:#0366d6;
+      --bg:#f6f8fa;
+      --ui:#ffffff;
+      --muted:#444;
+    }
+    html,body { height:100%; margin:0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--muted); }
+    header { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--brand); color:white; }
+    header h1 { margin:0; font-size:16px; font-weight:600; }
+    .toolbar { display:flex; gap:8px; align-items:center; margin-left:auto; }
+    .btn { background:var(--ui); color:var(--brand); border-radius:6px; padding:6px 10px; text-decoration:none; font-weight:600; border:1px solid rgba(0,0,0,0.06); cursor:pointer; }
+    .btn:disabled { opacity:0.5; cursor:not-allowed; }
+    .viewer-wrap { display:flex; height:calc(100vh - 56px); }
+    .sidebar { width:240px; background:#fff; border-right:1px solid #e6e9ee; padding:12px; box-sizing:border-box; overflow:auto; }
+    .canvas-area { flex:1; display:flex; justify-content:center; align-items:start; padding:18px; overflow:auto; }
+    canvas { box-shadow:0 6px 20px rgba(10,20,40,0.08); background:white; max-width:100%; height:auto; }
+    .controls { margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .small { padding:6px 8px; font-size:13px; }
+    input[type="number"] { width:64px; padding:6px 8px; border-radius:6px; border:1px solid #ddd; }
+    .note { padding:10px 12px; font-size:13px; color:#222; margin-bottom:10px; background:#fff; border:1px solid #eee; border-radius:6px; }
+    .thumb { display:block; width:100%; margin-bottom:8px; border-radius:4px; border:1px solid #eee; overflow:hidden; background:#fafafa; padding:6px; box-sizing:border-box; text-align:center; color:#888; font-size:13px; }
+    footer { padding:10px 14px; font-size:13px; color:#666; text-align:center; background:transparent; }
+    @media (max-width:800px) {
+      .sidebar { display:none; }
+      header { padding:10px; }
+      .toolbar { margin-left:6px; }
+    }
+  </style>
 </head>
-<body style="font-family:system-ui,Segoe UI,Roboto,sans-serif; padding:24px;">
-  <h1>Worklyffe Presentation</h1>
-  <p>
-    Click the button below to open the PDF in a new tab (interactive in the browser's PDF viewer):
-  </p>
-  <p>
-    <a href="https://raw.githubusercontent.com/lyntonpinto/WL--Presentation/main/Worklyffe_Presentation_2026.pdf"
-       target="_blank" rel="noopener noreferrer"
-       style="display:inline-block;padding:10px 16px;background:#0366d6;color:white;border-radius:6px;text-decoration:none;">
-      Open Presentation
-    </a>
-  </p>
+<body>
+  <header>
+    <h1>Worklyffe Presentation</h1>
+
+    <div class="toolbar" role="toolbar" aria-label="PDF controls">
+      <button id="prev" class="btn small">Prev</button>
+      <button id="next" class="btn small">Next</button>
+
+      <div style="display:flex;align-items:center;background:var(--ui);padding:6px;border-radius:6px;border:1px solid #e6e9ee;">
+        <label for="pageNum" style="margin-right:6px;font-weight:600;color:#222;font-size:13px">Page</label>
+        <input id="pageNum" type="number" min="1" value="1" />
+        <span id="pageCount" style="margin-left:6px;font-size:13px;color:#fff0"></span>
+      </div>
+
+      <button id="zoomOut" class="btn small">–</button>
+      <span id="scaleLabel" style="min-width:48px;text-align:center;color:white;opacity:0.9"></span>
+      <button id="zoomIn" class="btn small">+</button>
+
+      <a id="download" class="btn small" style="text-decoration:none;" download>Download</a>
+      <button id="rotate" class="btn small">Rotate</button>
+    </div>
+  </header>
+
+  <div class="viewer-wrap" role="main">
+    <aside class="sidebar" aria-label="PDF info and thumbnails">
+      <div class="note">
+        Interactive viewer (powered by pdf.js). Use the controls above to navigate, zoom and download the PDF.
+      </div>
+      <div id="thumbnails" aria-live="polite"></div>
+    </aside>
+
+    <div class="canvas-area">
+      <canvas id="pdf-canvas" role="img" aria-label="PDF page rendering"></canvas>
+    </div>
+  </div>
+
+  <footer>
+    If the viewer is blank, make sure this index.html and Worklyffe_Presentation_2026.pdf are in the same folder and you enabled GitHub Pages for the repository.
+  </footer>
+
+  <!-- pdf.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <script>
+    // CHANGE THIS to match the exact filename in your repo (case-sensitive)
+    const PDF_URL = 'Worklyffe_Presentation_2026.pdf';
+
+    // pdf.js worker
+    if (pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    }
+
+    // UI elements
+    const canvas = document.getElementById('pdf-canvas');
+    const ctx = canvas.getContext('2d');
+    const prevBtn = document.getElementById('prev');
+    const nextBtn = document.getElementById('next');
+    const pageNumInput = document.getElementById('pageNum');
+    const pageCountSpan = document.getElementById('pageCount');
+    const zoomInBtn = document.getElementById('zoomIn');
+    const zoomOutBtn = document.getElementById('zoomOut');
+    const scaleLabel = document.getElementById('scaleLabel');
+    const downloadA = document.getElementById('download');
+    const rotateBtn = document.getElementById('rotate');
+    const thumbs = document.getElementById('thumbnails');
+
+    let pdfDoc = null;
+    let pageNum = 1;
+    let scale = 1.25;    // initial zoom
+    let rotation = 0;
+    let rendering = false;
+
+    function updateScaleLabel() { scaleLabel.textContent = Math.round(scale * 100) + '%'; }
+
+    async function renderPage(num) {
+      if (!pdfDoc) return;
+      rendering = true;
+      // get page
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale: scale, rotation: rotation });
+      // fit to width if too wide for viewport? we keep scale controllable by user
+      canvas.width = Math.min(viewport.width, Math.max(800, viewport.width));
+      canvas.height = viewport.height;
+      // high DPI support
+      const outputScale = window.devicePixelRatio || 1;
+      canvas.width = Math.floor(viewport.width * outputScale);
+      canvas.height = Math.floor(viewport.height * outputScale);
+      canvas.style.width = Math.floor(viewport.width) + 'px';
+      canvas.style.height = Math.floor(viewport.height) + 'px';
+      ctx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+
+      const renderContext = { canvasContext: ctx, viewport: page.getViewport({ scale: scale, rotation: rotation }) };
+      await page.render(renderContext).promise;
+      rendering = false;
+      pageNumInput.value = num;
+    }
+
+    function queueRenderPage(num) {
+      if (rendering) {
+        // small debounce if rendering in progress
+        setTimeout(() => queueRenderPage(num), 100);
+      } else {
+        renderPage(num);
+      }
+    }
+
+    function onPrev() {
+      if (pageNum <= 1) return;
+      pageNum--;
+      queueRenderPage(pageNum);
+      updateButtons();
+    }
+
+    function onNext() {
+      if (pageNum >= pdfDoc.numPages) return;
+      pageNum++;
+      queueRenderPage(pageNum);
+      updateButtons();
+    }
+
+    function updateButtons() {
+      prevBtn.disabled = pageNum <= 1;
+      nextBtn.disabled = pageNum >= (pdfDoc ? pdfDoc.numPages : 1);
+    }
+
+    prevBtn.addEventListener('click', onPrev);
+    nextBtn.addEventListener('click', onNext);
+
+    pageNumInput.addEventListener('change', (e) => {
+      const desired = Math.max(1, Math.min(pdfDoc.numPages, Number(e.target.value) || 1));
+      pageNum = desired;
+      queueRenderPage(pageNum);
+      updateButtons();
+    });
+
+    zoomInBtn.addEventListener('click', () => {
+      scale = Math.min(4.0, scale + 0.25);
+      updateScaleLabel();
+      queueRenderPage(pageNum);
+    });
+    zoomOutBtn.addEventListener('click', () => {
+      scale = Math.max(0.25, scale - 0.25);
+      updateScaleLabel();
+      queueRenderPage(pageNum);
+    });
+
+    rotateBtn.addEventListener('click', () => {
+      rotation = (rotation + 90) % 360;
+      queueRenderPage(pageNum);
+    });
+
+    // thumbnails (lightweight): render low-res page previews
+    async function buildThumbnails() {
+      thumbs.innerHTML = '';
+      const count = pdfDoc.numPages;
+      for (let i = 1; i <= count; i++) {
+        const page = await pdfDoc.getPage(i);
+        const vp = page.getViewport({ scale: 0.15 });
+        const can = document.createElement('canvas');
+        can.width = vp.width; can.height = vp.height;
+        const ctx2 = can.getContext('2d');
+        await page.render({ canvasContext: ctx2, viewport: vp }).promise;
+        const wrapper = document.createElement('button');
+        wrapper.className = 'thumb';
+        wrapper.title = 'Go to page ' + i;
+        wrapper.setAttribute('aria-label', 'Go to page ' + i);
+        wrapper.appendChild(can);
+        wrapper.addEventListener('click', () => {
+          pageNum = i;
+          queueRenderPage(pageNum);
+          updateButtons();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+        thumbs.appendChild(wrapper);
+      }
+    }
+
+    // load PDF
+    (async function loadPdf() {
+      try {
+        // Use same-origin relative path — recommended: put index.html and the PDF in same folder and enable GitHub Pages.
+        downloadA.href = PDF_URL;
+        downloadA.setAttribute('target','_blank');
+        downloadA.setAttribute('rel','noopener noreferrer');
+        // Fetch and load
+        pdfDoc = await pdfjsLib.getDocument(PDF_URL).promise;
+        pageCountSpan.textContent = `/ ${pdfDoc.numPages}`;
+        updateScaleLabel();
+        buildThumbnails().catch(console.warn);
+        renderPage(pageNum);
+        updateButtons();
+      } catch (err) {
+        console.error('Error loading PDF:', err);
+        document.querySelector('footer').textContent = 'Could not load PDF — check that the file exists in the same folder and that Pages is enabled. Console shows details.';
+      }
+    })();
+  </script>
 </body>
 </html>
