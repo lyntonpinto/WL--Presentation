@@ -5,12 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Worklyffe Presentation — Interactive Viewer</title>
   <style>
-    :root {
-      --brand:#0366d6;
-      --bg:#f6f8fa;
-      --ui:#ffffff;
-      --muted:#444;
-    }
+    :root { --brand:#0366d6; --bg:#f6f8fa; --ui:#ffffff; --muted:#444; }
     html,body { height:100%; margin:0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--muted); }
     header { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--brand); color:white; }
     header h1 { margin:0; font-size:16px; font-weight:600; }
@@ -18,7 +13,7 @@
     .btn { background:var(--ui); color:var(--brand); border-radius:6px; padding:6px 10px; text-decoration:none; font-weight:600; border:1px solid rgba(0,0,0,0.06); cursor:pointer; }
     .btn:disabled { opacity:0.5; cursor:not-allowed; }
     .viewer-wrap { display:flex; height:calc(100vh - 56px); }
-    .sidebar { width:240px; background:#fff; border-right:1px solid #e6e9ee; padding:12px; box-sizing:border-box; overflow:auto; }
+    .sidebar { width:260px; background:#fff; border-right:1px solid #e6e9ee; padding:12px; box-sizing:border-box; overflow:auto; }
     .canvas-area { flex:1; display:flex; justify-content:center; align-items:start; padding:18px; overflow:auto; }
     canvas { box-shadow:0 6px 20px rgba(10,20,40,0.08); background:white; max-width:100%; height:auto; }
     .controls { margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
@@ -26,12 +21,10 @@
     input[type="number"] { width:64px; padding:6px 8px; border-radius:6px; border:1px solid #ddd; }
     .note { padding:10px 12px; font-size:13px; color:#222; margin-bottom:10px; background:#fff; border:1px solid #eee; border-radius:6px; }
     .thumb { display:block; width:100%; margin-bottom:8px; border-radius:4px; border:1px solid #eee; overflow:hidden; background:#fafafa; padding:6px; box-sizing:border-box; text-align:center; color:#888; font-size:13px; }
+    .search { display:flex; gap:6px; align-items:center; }
+    .search input { padding:6px 8px; border-radius:6px; border:1px solid #ddd; min-width:160px; }
     footer { padding:10px 14px; font-size:13px; color:#666; text-align:center; background:transparent; }
-    @media (max-width:800px) {
-      .sidebar { display:none; }
-      header { padding:10px; }
-      .toolbar { margin-left:6px; }
-    }
+    @media (max-width:900px) { .sidebar { display:none; } .toolbar { margin-left:6px; } }
   </style>
 </head>
 <body>
@@ -45,12 +38,17 @@
       <div style="display:flex;align-items:center;background:var(--ui);padding:6px;border-radius:6px;border:1px solid #e6e9ee;">
         <label for="pageNum" style="margin-right:6px;font-weight:600;color:#222;font-size:13px">Page</label>
         <input id="pageNum" type="number" min="1" value="1" />
-        <span id="pageCount" style="margin-left:6px;font-size:13px;color:#fff0"></span>
+        <span id="pageCount" style="margin-left:6px;font-size:13px;color:#222"></span>
       </div>
 
       <button id="zoomOut" class="btn small">–</button>
-      <span id="scaleLabel" style="min-width:48px;text-align:center;color:white;opacity:0.9"></span>
+      <span id="scaleLabel" style="min-width:48px;text-align:center;color:white;opacity:0.95"></span>
       <button id="zoomIn" class="btn small">+</button>
+
+      <div class="search">
+        <input id="searchInput" placeholder="Search text..." aria-label="Search PDF text" />
+        <button id="searchBtn" class="btn small">Find</button>
+      </div>
 
       <a id="download" class="btn small" style="text-decoration:none;" download>Download</a>
       <button id="rotate" class="btn small">Rotate</button>
@@ -59,9 +57,7 @@
 
   <div class="viewer-wrap" role="main">
     <aside class="sidebar" aria-label="PDF info and thumbnails">
-      <div class="note">
-        Interactive viewer (powered by pdf.js). Use the controls above to navigate, zoom and download the PDF.
-      </div>
+      <div class="note">Interactive viewer (pdf.js powered). Use controls to navigate, zoom, rotate and search.</div>
       <div id="thumbnails" aria-live="polite"></div>
     </aside>
 
@@ -71,13 +67,13 @@
   </div>
 
   <footer>
-    If the viewer is blank, make sure this index.html and Worklyffe_Presentation_2026.pdf are in the same folder and you enabled GitHub Pages for the repository.
+    If the viewer is blank, ensure this index.html and Worklyffe_Presentation_2026.pdf are in the same folder and GitHub Pages is enabled.
   </footer>
 
   <!-- pdf.js from CDN -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
   <script>
-    // CHANGE THIS to match the exact filename in your repo (case-sensitive)
+    // Filename — must match exactly (case-sensitive). Keep PDF in same folder for same-origin.
     const PDF_URL = 'Worklyffe_Presentation_2026.pdf';
 
     // pdf.js worker
@@ -98,10 +94,12 @@
     const downloadA = document.getElementById('download');
     const rotateBtn = document.getElementById('rotate');
     const thumbs = document.getElementById('thumbnails');
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
 
     let pdfDoc = null;
     let pageNum = 1;
-    let scale = 1.25;    // initial zoom
+    let scale = 1.15;    // initial zoom
     let rotation = 0;
     let rendering = false;
 
@@ -110,13 +108,10 @@
     async function renderPage(num) {
       if (!pdfDoc) return;
       rendering = true;
-      // get page
       const page = await pdfDoc.getPage(num);
       const viewport = page.getViewport({ scale: scale, rotation: rotation });
-      // fit to width if too wide for viewport? we keep scale controllable by user
-      canvas.width = Math.min(viewport.width, Math.max(800, viewport.width));
-      canvas.height = viewport.height;
-      // high DPI support
+
+      // setup canvas for high-DPI
       const outputScale = window.devicePixelRatio || 1;
       canvas.width = Math.floor(viewport.width * outputScale);
       canvas.height = Math.floor(viewport.height * outputScale);
@@ -124,109 +119,105 @@
       canvas.style.height = Math.floor(viewport.height) + 'px';
       ctx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
 
-      const renderContext = { canvasContext: ctx, viewport: page.getViewport({ scale: scale, rotation: rotation }) };
+      const renderContext = { canvasContext: ctx, viewport };
       await page.render(renderContext).promise;
       rendering = false;
       pageNumInput.value = num;
     }
 
     function queueRenderPage(num) {
-      if (rendering) {
-        // small debounce if rendering in progress
-        setTimeout(() => queueRenderPage(num), 100);
-      } else {
-        renderPage(num);
-      }
+      if (rendering) return setTimeout(() => queueRenderPage(num), 100);
+      renderPage(num);
     }
 
-    function onPrev() {
-      if (pageNum <= 1) return;
-      pageNum--;
-      queueRenderPage(pageNum);
-      updateButtons();
-    }
-
-    function onNext() {
-      if (pageNum >= pdfDoc.numPages) return;
-      pageNum++;
-      queueRenderPage(pageNum);
-      updateButtons();
-    }
+    function onPrev() { if (pageNum <= 1) return; pageNum--; queueRenderPage(pageNum); updateButtons(); }
+    function onNext() { if (pageNum >= pdfDoc.numPages) return; pageNum++; queueRenderPage(pageNum); updateButtons(); }
 
     function updateButtons() {
       prevBtn.disabled = pageNum <= 1;
       nextBtn.disabled = pageNum >= (pdfDoc ? pdfDoc.numPages : 1);
+      pageCountSpan.textContent = `/ ${pdfDoc ? pdfDoc.numPages : '?'}`;
     }
 
     prevBtn.addEventListener('click', onPrev);
     nextBtn.addEventListener('click', onNext);
-
     pageNumInput.addEventListener('change', (e) => {
       const desired = Math.max(1, Math.min(pdfDoc.numPages, Number(e.target.value) || 1));
-      pageNum = desired;
-      queueRenderPage(pageNum);
-      updateButtons();
+      pageNum = desired; queueRenderPage(pageNum); updateButtons();
     });
 
-    zoomInBtn.addEventListener('click', () => {
-      scale = Math.min(4.0, scale + 0.25);
-      updateScaleLabel();
-      queueRenderPage(pageNum);
-    });
-    zoomOutBtn.addEventListener('click', () => {
-      scale = Math.max(0.25, scale - 0.25);
-      updateScaleLabel();
-      queueRenderPage(pageNum);
-    });
+    zoomInBtn.addEventListener('click', () => { scale = Math.min(4.0, scale + 0.25); updateScaleLabel(); queueRenderPage(pageNum); });
+    zoomOutBtn.addEventListener('click', () => { scale = Math.max(0.25, scale - 0.25); updateScaleLabel(); queueRenderPage(pageNum); });
+    rotateBtn.addEventListener('click', () => { rotation = (rotation + 90) % 360; queueRenderPage(pageNum); });
 
-    rotateBtn.addEventListener('click', () => {
-      rotation = (rotation + 90) % 360;
-      queueRenderPage(pageNum);
-    });
-
-    // thumbnails (lightweight): render low-res page previews
+    // thumbnails: small canvases per page
     async function buildThumbnails() {
       thumbs.innerHTML = '';
       const count = pdfDoc.numPages;
       for (let i = 1; i <= count; i++) {
         const page = await pdfDoc.getPage(i);
-        const vp = page.getViewport({ scale: 0.15 });
+        const vp = page.getViewport({ scale: 0.16 });
         const can = document.createElement('canvas');
-        can.width = vp.width; can.height = vp.height;
+        can.width = Math.floor(vp.width); can.height = Math.floor(vp.height);
         const ctx2 = can.getContext('2d');
         await page.render({ canvasContext: ctx2, viewport: vp }).promise;
         const wrapper = document.createElement('button');
         wrapper.className = 'thumb';
         wrapper.title = 'Go to page ' + i;
-        wrapper.setAttribute('aria-label', 'Go to page ' + i);
+        wrapper.style.cursor = 'pointer';
         wrapper.appendChild(can);
-        wrapper.addEventListener('click', () => {
-          pageNum = i;
-          queueRenderPage(pageNum);
-          updateButtons();
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
+        wrapper.addEventListener('click', () => { pageNum = i; queueRenderPage(pageNum); updateButtons(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
         thumbs.appendChild(wrapper);
       }
     }
 
-    // load PDF
+    // Basic search: scan each page's text content and navigate to the first page with a match.
+    // This is a simple, fast search that finds pages containing the query. Highlighting can be added later.
+    async function findText(query) {
+      if (!pdfDoc || !query) return null;
+      query = query.trim().toLowerCase();
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const txt = await page.getTextContent();
+        const strings = txt.items.map(item => item.str).join(' ').toLowerCase();
+        if (strings.includes(query)) return i;
+      }
+      return null;
+    }
+
+    searchBtn.addEventListener('click', async () => {
+      const q = searchInput.value;
+      if (!q) return;
+      searchBtn.disabled = true; searchBtn.textContent = 'Searching...';
+      try {
+        const foundPage = await findText(q);
+        if (foundPage) {
+          pageNum = foundPage; queueRenderPage(pageNum); updateButtons();
+          // simple feedback
+          searchBtn.textContent = 'Found';
+          setTimeout(() => { searchBtn.textContent = 'Find'; }, 1200);
+        } else {
+          searchBtn.textContent = 'Not found';
+          setTimeout(() => { searchBtn.textContent = 'Find'; }, 1200);
+        }
+      } catch (err) {
+        console.error('Search error', err);
+        searchBtn.textContent = 'Error';
+        setTimeout(() => { searchBtn.textContent = 'Find'; }, 1200);
+      } finally { searchBtn.disabled = false; }
+    });
+
+    // Load PDF
     (async function loadPdf() {
       try {
-        // Use same-origin relative path — recommended: put index.html and the PDF in same folder and enable GitHub Pages.
-        downloadA.href = PDF_URL;
-        downloadA.setAttribute('target','_blank');
-        downloadA.setAttribute('rel','noopener noreferrer');
-        // Fetch and load
+        downloadA.href = PDF_URL; downloadA.setAttribute('target','_blank'); downloadA.setAttribute('rel','noopener noreferrer');
         pdfDoc = await pdfjsLib.getDocument(PDF_URL).promise;
-        pageCountSpan.textContent = `/ ${pdfDoc.numPages}`;
-        updateScaleLabel();
+        updateScaleLabel(); pageCountSpan.textContent = `/ ${pdfDoc.numPages}`;
         buildThumbnails().catch(console.warn);
-        renderPage(pageNum);
-        updateButtons();
+        renderPage(pageNum); updateButtons();
       } catch (err) {
         console.error('Error loading PDF:', err);
-        document.querySelector('footer').textContent = 'Could not load PDF — check that the file exists in the same folder and that Pages is enabled. Console shows details.';
+        document.querySelector('footer').textContent = 'Could not load PDF — check that the file exists and Pages is enabled. See console for details.';
       }
     })();
   </script>
